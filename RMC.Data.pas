@@ -1,3 +1,5 @@
+// RMC.Data.pas - Versione aggiornata senza callback errati
+
 unit RMC.Data;
 
 interface
@@ -7,12 +9,12 @@ uses
   System.JSON,
   System.SysUtils,
   System.Net.HttpClient,
-  Flux.Dispatcher;
+  Flux.Dispatcher,
+  System.Threading;
 
 type
   IAgentData = interface
     ['{F1E2D3C4-5B6A-7890-ABCD-EF1234567890}']
-
 
     // Gestione standby (come AddressBook)
     function GetToken: string;
@@ -46,6 +48,8 @@ type
     procedure ExecuteCommand(const ASessionId: string; const ACommandLine: string;
       const ATimeout: Integer = 0; const APriority: Integer = 5);
 
+    // Metodo per avviare le sottoscrizioni quando DDP è pronto
+    procedure StartSubscriptions(const AAgentId: string);
   end;
 
 function GetAgentData(const ADDPClient: IDDPClient): IAgentData;
@@ -102,7 +106,6 @@ type
     procedure DDPMethod(const AMethodName: string; const AParams: TgrBsonArray);
     procedure HttpMethod(const AMethodName: string; const AParams: TgrBsonArray);
 
-
   protected
     { IAgentData implementation }
 
@@ -134,6 +137,8 @@ type
     procedure ExecuteCommand(const ASessionId: string; const ACommandLine: string;
       const ATimeout: Integer = 0; const APriority: Integer = 5);
 
+    procedure StartSubscriptions(const AAgentId: string);
+
   public
     constructor Create(const ADDPClient: IDDPClient);
     destructor Destroy; override;
@@ -149,7 +154,7 @@ begin
   FLock := TCriticalSection.Create;
 
   // Configure your REST URL here
-  FRestUrl := 'http://localhost:3000'; // Change to your server URL
+  FRestUrl := 'http://localhost:3000';
 end;
 
 destructor TAgentData.Destroy;
@@ -160,7 +165,7 @@ end;
 
 procedure TAgentData.CallMethod(const AMethodName: string; const AParams: TgrBsonArray);
 begin
-   if FStandby then
+  if FStandby then
     HttpMethod(AMethodName, AParams)
   else
     DDPMethod(AMethodName, AParams);
@@ -168,7 +173,25 @@ end;
 
 procedure TAgentData.DDPMethod(const AMethodName: string; const AParams: TgrBsonArray);
 begin
-  FDDPClient.Method(AMethodName, AParams);
+  try
+    // Chiamata asincrona - non aspetta la risposta
+    TTask.Run(
+      procedure
+      begin
+        try
+          var Result := FDDPClient.Method(AMethodName, AParams);
+          WriteLn(Format('[Data] DDP method %s completed successfully', [AMethodName]));
+        except
+          on E: Exception do
+            WriteLn(Format('[Data] DDP method %s failed: %s', [AMethodName, E.Message]));
+        end;
+      end);
+
+    WriteLn(Format('[Data] DDP method %s called asynchronously', [AMethodName]));
+  except
+    on E: Exception do
+      WriteLn(Format('[Data] Error calling DDP method %s: %s', [AMethodName, E.Message]));
+  end;
 end;
 
 procedure TAgentData.HttpMethod(const AMethodName: string; const AParams: TgrBsonArray);
@@ -177,15 +200,13 @@ var
   LHttpClientRequest: IHTTPRequest;
 begin
   LHttpClient := THTTPClient.Create;
-
-  LHttpClientRequest := LHttpClient.GetRequest(FRestUrl, AMethodName);
-  LHttpClientRequest.AddHeader('Authorization', 'Bearer ' + GetToken);
-  {TODO COMPLETARE}
-
-  //LHttpClientRequest.Body := TEncoding.UTF8.GetBytes(AParams.ToJson);
-  //LHttpClientRequest.ContentType := 'application/json';
-
-  //LHttpClient.Post(FRestUrl + '/methods/' + AMethodName, LHttpClientRequest);
+  try
+    LHttpClientRequest := LHttpClient.GetRequest(FRestUrl, AMethodName);
+    LHttpClientRequest.AddHeader('Authorization', 'Bearer ' + GetToken);
+    {TODO COMPLETARE}
+  finally
+    LHttpClient.Free;
+  end;
 end;
 
 function TAgentData.GetToken: string;
@@ -213,34 +234,68 @@ begin
   end;
 end;
 
+// Metodo per avviare le sottoscrizioni quando DDP è pronto
+procedure TAgentData.StartSubscriptions(const AAgentId: string);
+begin
+  WriteLn('[Data] Starting subscriptions for agent: ' + AAgentId);
+
+  try
+    SubscribeToCommands(AAgentId);
+    SubscribeToSessions(AAgentId);
+    SubscribeToAgentControl;
+
+    WriteLn('[Data] All subscriptions started successfully');
+  except
+    on E: Exception do
+      WriteLn('[Data] Error starting subscriptions: ' + E.Message);
+  end;
+end;
+
 // ========================================================================
 // SOTTOSCRIZIONI DDP
 // ========================================================================
 
 procedure TAgentData.SubscribeToCommands(const AAgentId: string);
 begin
-FDDPClient.Subscribe(COMMANDS_SUBSCRIPTION,
-    TgrBsonArray.Create([
-      TgrBsonDocument.Create
-        .Add('agent_id', AAgentId)
-    ]));
+  try
+    // CORRETTO: Passa un oggetto con agent_id come si aspetta la pubblicazione
+    FDDPClient.Subscribe(COMMANDS_SUBSCRIPTION,
+      TgrBsonArray.Create([
+        TgrBsonDocument.Create.Add('agent_id', AAgentId)
+      ]));
+    WriteLn('[Data] Subscribed to commands for agent: ' + AAgentId);
+  except
+    on E: Exception do
+      WriteLn('[Data] Error subscribing to commands: ' + E.Message);
+  end;
 end;
 
 procedure TAgentData.SubscribeToSessions(const AAgentId: string);
 begin
-
-  FDDPClient.Subscribe(SESSIONS_SUBSCRIPTION,
-    TgrBsonArray.Create([
-      TgrBsonDocument.Create
-        .Add('agent_id', AAgentId)
-    ]));
+  try
+    // CORRETTO: Passa un oggetto con agent_id come si aspetta la pubblicazione
+    FDDPClient.Subscribe(SESSIONS_SUBSCRIPTION,
+      TgrBsonArray.Create([
+        TgrBsonDocument.Create.Add('agent_id', AAgentId)
+      ]));
+    WriteLn('[Data] Subscribed to sessions for agent: ' + AAgentId);
+  except
+    on E: Exception do
+      WriteLn('[Data] Error subscribing to sessions: ' + E.Message);
+  end;
 end;
 
 procedure TAgentData.SubscribeToAgentControl;
 begin
-  FDDPClient.Subscribe(AGENT_CONTROL_SUBSCRIPTION, TgrBsonArray.Create);
+  try
+    // Per agent control, non servono parametri se è globale
+    FDDPClient.Subscribe(AGENT_CONTROL_SUBSCRIPTION, TgrBsonArray.Create);
+    WriteLn('[Data] Subscribed to agent control');
+  except
+    on E: Exception do
+      WriteLn('[Data] Error subscribing to agent control: ' + E.Message);
+  end;
 end;
-
 
 // ========================================================================
 // METODI DDP PER REGISTRAZIONE AGENT
@@ -250,16 +305,23 @@ procedure TAgentData.RegisterAgent(const AAgentId: string; const AAgentInfo: TJS
 var
   InfoDoc: TgrBsonDocument;
 begin
-  InfoDoc := TgrBsonDocument.Parse(AAgentInfo.ToJSON);
+  try
+    InfoDoc := TgrBsonDocument.Parse(AAgentInfo.ToJSON);
 
-  CallMethod(AGENT_REGISTER,
-    TgrBsonArray.Create([
-      TgrBsonDocument.Create
-        .Add('agent_id', AAgentId)
-        .Add('info', InfoDoc)
-        .Add('status', 'online')
-        .Add('registered_at', DateToISO8601(Now, True))
-    ]));
+    CallMethod(AGENT_REGISTER,
+      TgrBsonArray.Create([
+        TgrBsonDocument.Create
+          .Add('agent_id', AAgentId)
+          .Add('info', InfoDoc)
+          .Add('status', 'online')
+          .Add('registered_at', DateToISO8601(Now, True))
+      ]));
+
+    WriteLn('[Data] Agent registered: ' + AAgentId);
+  except
+    on E: Exception do
+      WriteLn('[Data] Error registering agent: ' + E.Message);
+  end;
 end;
 
 procedure TAgentData.UpdateAgentStatus(const AAgentId, AStatus: string);
@@ -313,6 +375,7 @@ begin
 
   CallMethod(AGENT_STATUS, TgrBsonArray.Create([LBsonDoc]));
 end;
+
 // Session management
 procedure TAgentData.OpenSession(const AUserId: string; const AShellType: string;
   const AWorkingDir: string; const AEnvironment: string);
@@ -359,46 +422,60 @@ begin
   CallMethod(SESSION_HEARTBEAT, TgrBsonArray.Create([ASessionId, Now]));
 end;
 
-
 // ========================================================================
 // METODI DDP PER OUTPUT
 // ========================================================================
 
 procedure TAgentData.SendOutput(const AAgentId, ASessionId, AStream, AData: string);
 begin
-  CallMethod(COMMAND_OUTPUT,
-    TgrBsonArray.Create([
-      TgrBsonDocument.Create
-        .Add('agent_id', AAgentId)
-        .Add('session_id', ASessionId)
-        .Add('stream', AStream)
-        .Add('data', AData)
-        .Add('timestamp', DateToISO8601(Now, True))
-    ]));
+  // Usa la versione asincrona
+  TTask.Run(
+    procedure
+    begin
+      CallMethod(COMMAND_OUTPUT,
+        TgrBsonArray.Create([
+          TgrBsonDocument.Create
+            .Add('agent_id', AAgentId)
+            .Add('session_id', ASessionId)
+            .Add('stream', AStream)
+            .Add('data', AData)
+            .Add('timestamp', DateToISO8601(Now, True))
+        ]));
+    end);
 end;
 
 procedure TAgentData.SendCommandComplete(const AAgentId, ASessionId: string; const AExitCode: Integer);
 begin
-  CallMethod(COMMAND_COMPLETED,
-    TgrBsonArray.Create([
-      TgrBsonDocument.Create
-        .Add('agent_id', AAgentId)
-        .Add('session_id', ASessionId)
-        .Add('exit_code', AExitCode)
-        .Add('timestamp', DateToISO8601(Now, True))
-    ]));
+  // Usa la versione asincrona
+  TTask.Run(
+    procedure
+    begin
+      CallMethod(COMMAND_COMPLETED,
+        TgrBsonArray.Create([
+          TgrBsonDocument.Create
+            .Add('agent_id', AAgentId)
+            .Add('session_id', ASessionId)
+            .Add('exit_code', AExitCode)
+            .Add('timestamp', DateToISO8601(Now, True))
+        ]));
+    end);
 end;
 
 procedure TAgentData.SendError(const AAgentId, ASessionId, AError: string);
 begin
-  CallMethod(COMMAND_SEND_ERROR,
-    TgrBsonArray.Create([
-      TgrBsonDocument.Create
-        .Add('agent_id', AAgentId)
-        .Add('session_id', ASessionId)
-        .Add('error', AError)
-        .Add('timestamp', DateToISO8601(Now, True))
-    ]));
+  // Usa la versione asincrona
+  TTask.Run(
+    procedure
+    begin
+      CallMethod(COMMAND_SEND_ERROR,
+        TgrBsonArray.Create([
+          TgrBsonDocument.Create
+            .Add('agent_id', AAgentId)
+            .Add('session_id', ASessionId)
+            .Add('error', AError)
+            .Add('timestamp', DateToISO8601(Now, True))
+        ]));
+    end);
 end;
 
 procedure TAgentData.SendSessionStatus(const AAgentId, ASessionId, AStatus: string);
@@ -412,7 +489,6 @@ begin
         .Add('timestamp', DateToISO8601(Now, True))
     ]));
 end;
-
 
 // Command execution
 procedure TAgentData.ExecuteCommand(const ASessionId: string; const ACommandLine: string;

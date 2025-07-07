@@ -6,7 +6,10 @@ uses
   RMC.ActionCreator,
   DDP.NetLib.SGC,
   sgcWebSocket_Classes,
-  System.SysUtils;
+  System.SysUtils,
+  sgcWebSocket_Types,
+  DDP.Interfaces,
+  System.Generics.Collections;
 
 type
   TAgentDDPNetLibSGC = class(TDDPNetLibSGC)

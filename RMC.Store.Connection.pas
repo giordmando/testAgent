@@ -31,7 +31,8 @@ uses
   Flux.Store.Base,
   Grijjy.Data.Bson,
   Grijjy.System.Messaging,
-  System.SyncObjs;
+  System.SyncObjs,
+  System.SysUtils;
 
 type
   TStoreAgentConnection = class(TStoreBase, IStoreAgentConnection)
@@ -117,26 +118,35 @@ begin
   Assert(AAction is TFluxAction);
 
   LActionType := LAction.&Type;
+
+  // AGGIUNGI DEBUG
+  WriteLn(Format('[ConnectionStore] Received action: %s', [LActionType]));
+
   if LActionType = ACTION_DDP_USING_CREDENTIALS then
   begin
+    WriteLn('[ConnectionStore] Using credentials');
     FLoginType := TLoginType.Credentials;
   end
   else if LActionType = ACTION_DDP_USING_TOKEN then
   begin
+    WriteLn('[ConnectionStore] Using token');
     FLoginType := TLoginType.Token;
   end
   else if LActionType = ACTION_DDP_CONNECTING then
   begin
+    WriteLn('[ConnectionStore] Connecting...');
     // Do not switch to Connecting status when in standby
     if FConnectionStatus <> TConnectionStatus.Standby then
       FConnectionStatus := TConnectionStatus.Connecting;
   end
   else if LActionType = ACTION_DDP_CONNECTED then
   begin
+    WriteLn('[ConnectionStore] Connected!');
     FConnectionStatus := TConnectionStatus.Connected;
   end
   else if LActionType = ACTION_DDP_DISCONNECTED then
   begin
+    WriteLn('[ConnectionStore] Disconnected');
     // prevent status change from error to disconnect
     if FConnectionStatus = TConnectionStatus.ConnectionError then
       Exit;
@@ -144,11 +154,13 @@ begin
   end
   else if LActionType = ACTION_DDP_STANDBY then
   begin
+    WriteLn('[ConnectionStore] Standby mode');
     FConnectionStatus := TConnectionStatus.Standby;
     FLoginStatus := TLoginStatus.Standby;
   end
   else if LActionType = ACTION_DDP_CONNECTION_ERROR then
   begin
+    WriteLn('[ConnectionStore] Connection error');
     if (not LAction.Data.IsNil) and LAction.Data['msg'].IsString then
     begin
       FConnectionErrorMsg := LAction.Data['msg'].AsString;
@@ -157,6 +169,7 @@ begin
   end
   else if LActionType = ACTION_DDP_CONNECTION_EXCEPTION then
   begin
+    WriteLn('[ConnectionStore] Connection exception');
     if (not LAction.Data.IsNil) and LAction.Data['msg'].IsString then
     begin
       FConnectionErrorMsg := LAction.Data['msg'].AsString;
@@ -165,37 +178,46 @@ begin
   end
   else if LActionType = ACTION_DDP_LOGGING_IN then
   begin
+    WriteLn('[ConnectionStore] Logging in...');
     // Do not switch to LoggingIn status when in standby
     if FLoginStatus <> TLoginStatus.Standby then
       FLoginStatus := TLoginStatus.LoggingIn;
   end
   else if LActionType = ACTION_DDP_LOGGED_IN then
   begin
+    WriteLn('[ConnectionStore] Logged in!');
     FLoginStatus := TLoginStatus.LoggedIn;
   end
   else if LActionType = ACTION_DDP_LOGGED_OUT then
   begin
+    WriteLn('[ConnectionStore] Logged out');
     FLoginStatus := TLoginStatus.LoggedOut;
     FLoginType := TLoginType.None;
   end
   else if LActionType = ACTION_DDP_LOGIN_ERROR then
   begin
+    WriteLn('[ConnectionStore] Login error');
     FLoginStatus := TLoginStatus.LoginError;
   end
   else if LActionType = ACTION_DDP_LOGIN_LOCKED_LOGIN then
   begin
+    WriteLn('[ConnectionStore] Login locked');
     FLoginStatus := TLoginStatus.LoginLockedLogin;
     if (not LAction.Data.IsNil) and LAction.Data['seconds'].IsInt32 then
       FLockedLoginSeconds := LAction.Data['seconds'].AsInteger;
   end
   else if LActionType = ACTION_DDP_LOGIN_2FA_REQUIRED then
   begin
+    WriteLn('[ConnectionStore] 2FA required');
     FLoginStatus := TLoginStatus.LoginRequire2FA;
   end
   else
   begin
+    // Non è un'azione che ci interessa
     Exit;
   end;
+     WriteLn(Format('[ConnectionStore] New status - Connection: %d, Login: %d',
+    [Ord(FConnectionStatus), Ord(FLoginStatus)]));
   EmitStoreChange;
 end;
 

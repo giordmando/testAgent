@@ -1,270 +1,302 @@
+// Test per identificare esattamente il problema
+
 program RMCDDPAgent;
 
 {$APPTYPE CONSOLE}
 
-{$R *.res}
-
 uses
   System.SysUtils,
-  System.Classes,
-  System.SyncObjs,
+  RMC.DDP.NetLib.SGC,
+  DDP.Interfaces,
+  DDP.Factories,
+  DDP.RequestGenerator,
+  Grijjy.Data.Bson,
   System.Threading,
-  System.DateUtils,
-  Grijjy.System.Messaging,
-  AgentConfig in 'AgentConfig.pas',
-  AgentServiceI in 'AgentServiceI.pas',
-  AuthManagerImpl in 'AuthManagerImpl.pas',
-  Crypto_Passthrough in 'Crypto_Passthrough.pas',
-  EnvironmentInfoImpl in 'EnvironmentInfoImpl.pas',
-  Exceptions in 'Exceptions.pas',
-  Factories in 'Factories.pas',
-  Logger_Local in 'Logger_Local.pas',
-  RMC.ActionCreator in 'RMC.ActionCreator.pas',
-  RMC.Actions.Consts in 'RMC.Actions.Consts.pas',
-  RMC.Connection in 'RMC.Connection.pas',
-  RMC.Data in 'RMC.Data.pas',
-  RMC.DDP.NetLib.Grijjy in 'RMC.DDP.NetLib.Grijjy.pas',
-  RMC.DDP.NetLib.SGC in 'RMC.DDP.NetLib.SGC.pas',
-  RMC.Store.Agent in 'RMC.Store.Agent.pas',
-  RMC.Store.Connection in 'RMC.Store.Connection.pas',
-  RMC.Store.Events in 'RMC.Store.Events.pas',
-  SessionManager in 'SessionManager.pas',
-  ShellRunner_PersistentCMD in 'ShellRunner_PersistentCMD.pas',
-  ShellSession in 'ShellSession.pas',
-  DDP.NetLib.Factory,
-  DDP.Interfaces;
+  AgentConfig,
+  RMC.Connection,
+  RMC.Data,
+  RMC.Store.Agent,
+  RMC.Store.Connection,
+  RMC.ActionCreator,
+  DDP.Actions.Consts,
+  Factories,           // AGGIUNTO per ShellRunnerFactory
+  EnvironmentInfoImpl,
+  AgentServiceI;
 
+procedure TestDDPFlow;
 var
-  Config: TAgentConfig;
-
-  // Servizi comuni
-  Logger: ILogger;
-  EnvInfo: IEnvironmentInfo;
-  AuthMgr: IAuthManager;
-
-  Crypto: ICryptoProvider;
-  SessionMgr: ISessionManager;
-  ShellFactory: IShellRunnerFactory;
-  TimeProv: ITimeProvider;
-
-  // Servizi di comunicazione
-  Registrar: IAgentRegistrar;
-  CommandReceiver: ICommandReceiver;
-  OutputSender: IOutputSender;
-
-
-procedure CreateCommonServices;
+  DDPNetLib: IDDPNetLib;
+  DDPClient: IDDPClient;
+  DDPRequestGenerator: IDDPRequestGenerator;
+  MessageCount: Integer;
 begin
-  // Crea servizi comuni a tutte le modalità
-  Logger := TLogger_Local.Create('agent.log');
-  Logger.Info('=== Agent RMM Starting ===');
+  WriteLn('=== DDP FLOW DIAGNOSTIC ===');
 
-  EnvInfo := CreateEnvironmentInfo;
-  AuthMgr := TAuthManager.Create;
-  Crypto := TCryptoProvider_Passthrough.Create; // O altra implementazione
-
-  // Configura autorizzazioni
-  AuthMgr.AddToWhitelist('dir*');
-  AuthMgr.AddToWhitelist('cd*');
-  AuthMgr.AddToWhitelist('ping*');
-  AuthMgr.AddToWhitelist('echo*');
-  AuthMgr.AddToBlacklist('format*');
-  AuthMgr.AddToBlacklist('del /s*');
-
-  // Session management
-  ShellFactory := TShellRunnerFactory.Create(EnvInfo);
-  SessionMgr := TSessionManager.Create(ShellFactory);
-end;
-
-
-
-procedure ForceLoginCompleted;
-var
-  ActionCreator: IActionCreatorAgent;
-begin
-  Writeln('=== FORZANDO LOGIN COMPLETATO ===');
-
-  ActionCreator := GetActionCreatorAgentWithId(Config.AgentId);
-  if Assigned(ActionCreator) then
-  begin
-    // *** ACCESS DIRETTO AL PRIVATE FIELD (Hack temporaneo) ***
-    // Nel TActionCreatorAgent, aggiungi un metodo pubblico:
-    ActionCreator.ForceMarkLoginCompleted;
-
-    Writeln('Login forzato come completato');
-
-    if ActionCreator.IsLoginCompleted then
-      Writeln('Verifica: Login ora risulta completato')
-    else
-      Writeln('Errore: Login ancora non completato');
-  end;
-end;
-
-
-procedure CreateDDPServices;
-var
-  ActionCreator: IActionCreatorAgent;
-  StoreAgent: IStoreAgentData;
-begin
-  Logger.Info('Modalità DDP (Distributed Data Protocol)');
+  MessageCount := 0;
 
   try
+    // 1. Test raw WebSocket communication
+    WriteLn('1. Testing raw WebSocket...');
+    DDPNetLib := TAgentDDPNetLibSGC.Create('ws://localhost:3000/websocket', 'flow_test');
 
-  // Initialize stores and action creator
- // *** STEP 2: VERIFICA CHE DDP.ACTIONCREATOR SIA COLLEGATO AL DISPATCHER ***
-    Writeln('[MAIN] ?? Verificando DDP ActionCreator...');
-    var DDPActionCreator := GetActionCreatorAgentWithId(Config.AgentId);
-    if not Assigned(DDPActionCreator) then
+    if DDPNetLib.Connect then
     begin
-      Writeln('[MAIN] ? ERRORE: DDP ActionCreator non disponibile!');
-      raise Exception.Create('DDP ActionCreator non inizializzato');
-    end;
-    Writeln('[MAIN] ? DDP ActionCreator OK');
+      WriteLn('   ? WebSocket connected');
 
-  var FStoreConnection := GetStoreAgentConnection;
+      // Send raw DDP connect message
+      DDPNetLib.SendData('{"msg":"connect","version":"1","support":["1"]}');
+      WriteLn('   ? Sent DDP connect');
 
+      // Wait for response
+      Sleep(2000);
 
-  // Subscribe to store changes
-//  GetFluxDispatcher.Register(TStoreRMCConnectionChangedMessage, OnConnectionChanged);//<TStoreAgentConnectionChangedMessage>(OnConnectionChanged);
-//  GetFluxDispatcher.Subscribe<TStoreAgentDataChangedMessage>(OnDataChanged);
+      var Response := DDPNetLib.ReceiveData;
+      while Response <> '' do
+      begin
+        Inc(MessageCount);
+        WriteLn(Format('   ? Raw message %d: %s', [MessageCount, Response.Substring(0, 100)]));
+        Response := DDPNetLib.ReceiveData;
+      end;
 
-
-    // *** STEP 0: ASSICURATI CHE IL DISPATCHER FLUX SIA INIZIALIZZATO ***
-    Writeln('[MAIN] ?? Inizializzando Flux Dispatcher...');
-
-    // *** STEP 1: CREA E REGISTRA STORE AGENT AL DISPATCHER ***
-    Writeln('[MAIN] ?? Creando Store Agent...');
-    StoreAgent := GetStoreAgentData(Config.AgentId);
-    if not Assigned(StoreAgent) then
-    begin
-      Writeln('[MAIN] ? ERRORE: Store Agent non creato!');
-      raise Exception.Create('Store Agent non creato');
-    end;
-    Writeln('[MAIN] ? Store Agent creato e registrato al Dispatcher');
-
-
-    // *** STEP 4: REGISTRA NETLIB FACTORY (ora il sistema Flux è pronto) ***
-    Writeln('[MAIN] ?? Registrando NetLib Factory...');
-    TDDPNetLibFactory.Register(
-    function: IDDPNetLib
-    begin
-//      Result := TAgentDDPNetLibSGC.Create(Config.DDPServerUrl, Config.AgentId);
-      Result := TRMCDDPNetLibGrijjy.Create(Config.DDPServerUrl, Config.AgentId);
+      WriteLn(Format('   Raw WebSocket: %d messages received', [MessageCount]));
     end
-    );
-    Writeln('[MAIN] ? NetLib Factory registrata');
+    else
+    begin
+      WriteLn('   ? WebSocket connection failed');
+      Exit;
+    end;
 
-    // *** STEP 5: CREA ADAPTER FACTORY E LOGIN ***
-    Writeln('[MAIN] ?? Creando DDP Factory e Login...');
+    // 2. Test DDP Client processing
+    WriteLn('');
+    WriteLn('2. Testing DDP Client...');
 
-    DDPActionCreator.Login(Config.DDPUsername, Config.DDPPassword);
-    Writeln('[MAIN] ? Login completato');
+    DDPRequestGenerator := TDDPRequestGenerator.Create;
+    DDPClient := GetDDPClient(DDPNetLib, DDPRequestGenerator);
 
-    Writeln('[MAIN] Sistema DDP completamente configurato');
-    Writeln('[MAIN] Flusso: NetLib ? DDPClient ? DDP.ActionCreator ? Dispatcher ? Store.Agent ? ActionCreator.Agent');
+    try
+      // This should handle the DDP protocol
+      var SessionId := DDPClient.Connect;
+      WriteLn(Format('   ? DDP connected with session: %s', [SessionId]));
+
+      // Test method call
+      var PingResult := DDPClient.Method('test.ping', TgrBsonArray.Create);
+      WriteLn(Format('   ? Method call result: %s', [PingResult.AsString]));
+
+    except
+      on E: Exception do
+        WriteLn('   ? DDP Client error: ' + E.Message);
+    end;
+
+    // 3. Test subscription
+    WriteLn('');
+    WriteLn('3. Testing DDP Subscription...');
+
+    try
+      var SubId := DDPClient.Subscribe('agent.commands',
+        TgrBsonArray.Create([
+          TgrBsonDocument.Create.Add('agent_id', 'flow_test')
+        ]));
+      WriteLn(Format('   ? Subscribed with ID: %s', [SubId]));
+
+      // Wait for subscription data
+      Sleep(3000);
+
+      // Check for more messages
+      var SubResponse := DDPNetLib.ReceiveData;
+      var SubMessageCount := 0;
+      while SubResponse <> '' do
+      begin
+        Inc(SubMessageCount);
+        WriteLn(Format('   ? Subscription message %d: %s', [SubMessageCount, SubResponse.Substring(0, 100)]));
+        SubResponse := DDPNetLib.ReceiveData;
+      end;
+
+      WriteLn(Format('   Subscription: %d messages received', [SubMessageCount]));
+
+    except
+      on E: Exception do
+        WriteLn('   ? Subscription error: ' + E.Message);
+    end;
+
+    DDPNetLib.Disconnect;
+
+  except
+    on E: Exception do
+      WriteLn('General error: ' + E.Message);
+  end;
+
+  WriteLn('');
+  WriteLn('=== DDP FLOW DIAGNOSTIC COMPLETE ===');
+end;
+
+var
+  ProcessingTask: ITask;
+
+ procedure StartDDPProcessing;
+begin
+  WriteLn('[Fix] Starting DDP processing task...');
+
+  ProcessingTask := TTask.Run(
+    procedure
+    begin
+      while True do
+      begin
+        Sleep(0); // Yield CPU to other threads
+        Sleep(50); // 50ms intervals
+      end;
+    end);
+
+  WriteLn('[Fix] DDP processing task started');
+end;
+
+procedure StopDDPProcessing;
+begin
+  if Assigned(ProcessingTask) then
+  begin
+    WriteLn('[Fix] Stopping DDP processing task...');
+    ProcessingTask.Cancel;
+    ProcessingTask := nil;
+  end;
+end;
+ procedure RunAgentFixed;
+var
+  Input: string;
+begin
+  WriteLn('=== RMC DDP Agent Running (FIXED) ===');
+  WriteLn('The agent is now listening for commands from the server.');
+  WriteLn('Commands will be executed in real-time.');
+  WriteLn('');
+
+  repeat
+    Write('> ');
+    ReadLn(Input);
+
+    // *** AGGIUNGI SOLO QUESTA LINEA DOPO OGNI ReadLn ***
+    Sleep(0); // Force thread context switch
+
+    Input := LowerCase(Trim(Input));
+
+    if Input = 'ping' then
+    begin
+      // ... tuo codice esistente ...
+    end
+    else if Input = 'test' then
+    begin
+      // ... tuo codice esistente ...
+
+      // *** AGGIUNGI ANCHE QUI ***
+      WriteLn('Test data inserted. Processing...');
+      Sleep(100); // Give time for DDP processing
+    end
+    else if Input = 'status' then
+    begin
+      // ... tuo codice esistente ...
+    end
+    else if Input = 'quit' then
+      Break;
+
+  until Input = 'quit';
+end;
+ var
+  Config: TAgentConfig;
+  DDPNetLib: IDDPNetLib;
+  DDPClient: IDDPClient;
+  DDPLogin: IDDPLogin;
+  DDPRequestGenerator: IDDPRequestGenerator;
+  AgentData: IAgentData;
+  AgentStore: IStoreAgent;
+  ConnectionStore: IStoreAgentConnection;
+  AgentConnection: IAgentConnection;
+   // AGGIUNTO: Servizi per esecuzione comandi
+  EnvironmentInfo: IEnvironmentInfo;
+  ShellRunnerFactory: IShellRunnerFactory;
+
+  procedure InitializeServices;
+begin
+  WriteLn('Initializing agent services...');
+
+  // Crea i servizi per l'esecuzione dei comandi
+  EnvironmentInfo := CreateEnvironmentInfo;
+  ShellRunnerFactory := TShellRunnerFactory.Create(EnvironmentInfo);
+
+  // Configura i servizi nello store agent
+  AgentStore.SetServices(AgentData, ShellRunnerFactory);
+
+  WriteLn('Agent services initialized successfully');
+end;
+
+procedure InitializeAgent;
+
+begin
+  try
+    WriteLn('Initializing RMC DDP Agent...');
+
+    Config := TAgentConfig.Create;
+    Config.LoadFromFile('agent.conf.json');
+
+    WriteLn('Agent ID: ' + Config.AgentId);
+    WriteLn('Server URL: ' + Config.DDPServerUrl);
+
+    // Inizializza gli store Flux
+    AgentStore := GetStoreAgent(Config.AgentId);
+    ConnectionStore := GetStoreAgentConnection;
+
+    // Crea i componenti DDP
+    DDPRequestGenerator := TDDPRequestGenerator.Create;
+    DDPNetLib := TAgentDDPNetLibSGC.Create(Config.DDPServerUrl, Config.AgentId);
+    DDPClient := GetDDPClient(DDPNetLib, DDPRequestGenerator);
+    DDPLogin := GetDDPLogin(DDPClient);
+
+    AgentConnection := GetAgentConnection(DDPClient, DDPLogin);
+    AgentData := GetAgentData(DDPClient);
+
+    // Inizializza i servizi per l'esecuzione dei comandi
+    InitializeServices;
+
+    WriteLn('Agent initialized successfully');
 
   except
     on E: Exception do
     begin
-      Logger.Error('Errore creazione servizi DDP: ' + E.Message);
-      Writeln('[MAIN] Errore DDP: ' + E.Message);
+      WriteLn('Error initializing agent: ' + E.Message);
       raise;
     end;
   end;
 end;
 
 
-
-procedure LoadConfiguration;
-begin
-  Config := TAgentConfig.Create;
-
-  // Carica configurazione
-  if FileExists('agent.conf.json') then
-  begin
-    Config.LoadFromFile('agent.conf.json');
-    Writeln('Configurazione caricata da agent.conf.json');
-  end
-  else
-  begin
-    // Usa valori di default (ora DDP per default)
-    Writeln('File configurazione non trovato, uso valori di default');
-    Config.SaveToFile('agent.conf.json');
-  end;
-
-  // Valida configurazione
-  var ValidationError := Config.Validate;
-  if not ValidationError.IsEmpty then
-  begin
-    Writeln('Errore configurazione: ' + ValidationError);
-    raise Exception.Create('Configurazione non valida: ' + ValidationError);
-  end;
-
-  Writeln('Agent ID: ' + Config.AgentId);
-  Writeln('Modalità: ' + Config.GetChannelTypeString);
-  Writeln('Shell Type: ' + Config.ShellType);
-  Writeln('Session Limit: ' + IntToStr(Config.SessionLimit));
-
-end;
-
-procedure ShowBanner;
-begin
-  Writeln('================================================');
-  Writeln('  Remote Command Line Agent v2.0');
-  Writeln('  SOLID Architecture Edition');
-  Writeln('================================================');
-  Writeln;
-end;
-
-
-procedure Cleanup;
+procedure StartSubscriptions;
 begin
   try
+    WriteLn('Starting DDP subscriptions...');
+    AgentData.StartSubscriptions(Config.AgentId);
+    WriteLn('Subscriptions started successfully');
 
-    // Cleanup comune
-    if Assigned(Config) then
-      Config.Free;
+    // Aspetta un po' per assicurarsi che le sottoscrizioni siano attive
+    Sleep(3000);
 
   except
     on E: Exception do
-      Writeln('Errore durante cleanup: ' + E.Message);
+      WriteLn('Error starting subscriptions: ' + E.Message);
   end;
 end;
 
-
 begin
-  try
-    ShowBanner;
+  //TestDDPFlow;
+  InitializeAgent;
+  StartSubscriptions;
 
-    // 1. Carica configurazione
-    LoadConfiguration;
+    // *** AGGIUNGI QUESTA LINEA ***
+    StartDDPProcessing;
 
-    // 2. Crea servizi comuni
-    CreateCommonServices;
+    // ... resto del codice esistente ...
 
-    CreateDDPServices;
+     RunAgentFixed;
 
-    Writeln(Format('Thread ID AGENTSERVICE: %d', [TThread.CurrentThread.ThreadID]));
-    // 5. Avvia agent
-    //RunAgent;
+    // *** AGGIUNGI QUESTA LINEA ***
+    StopDDPProcessing;
 
-    Logger.Info('=== Agent RMM Terminated ===');
-    Writeln('Agent terminato correttamente.');
-
-  except
-    on E: Exception do
-    begin
-      Writeln('Errore critico: ', E.ClassName, ' - ', E.Message);
-      ExitCode := 1;
-    end;
-  end;
-
-  // Cleanup
-  Cleanup;
-
-  {$IFDEF DEBUG}
-  Writeln;
-  Writeln('Premi INVIO per chiudere...');
-  Readln;
-  {$ENDIF}
+  WriteLn('Press Enter to exit...');
+  ReadLn;
+  Sleep(0);
 end.

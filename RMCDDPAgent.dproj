@@ -5,7 +5,7 @@
         <FrameworkType>VCL</FrameworkType>
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Debug</Config>
-        <Platform Condition="'$(Platform)'==''">Win64</Platform>
+        <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <ProjectName Condition="'$(ProjectName)'==''">RMCDDPAgent</ProjectName>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Console</AppType>
@@ -94,26 +94,6 @@
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
-        <DCCReference Include="AgentConfig.pas"/>
-        <DCCReference Include="AgentServiceI.pas"/>
-        <DCCReference Include="AuthManagerImpl.pas"/>
-        <DCCReference Include="Crypto_Passthrough.pas"/>
-        <DCCReference Include="EnvironmentInfoImpl.pas"/>
-        <DCCReference Include="Exceptions.pas"/>
-        <DCCReference Include="Factories.pas"/>
-        <DCCReference Include="Logger_Local.pas"/>
-        <DCCReference Include="RMC.ActionCreator.pas"/>
-        <DCCReference Include="RMC.Actions.Consts.pas"/>
-        <DCCReference Include="RMC.Connection.pas"/>
-        <DCCReference Include="RMC.Data.pas"/>
-        <DCCReference Include="RMC.DDP.NetLib.Grijjy.pas"/>
-        <DCCReference Include="RMC.DDP.NetLib.SGC.pas"/>
-        <DCCReference Include="RMC.Store.Agent.pas"/>
-        <DCCReference Include="RMC.Store.Connection.pas"/>
-        <DCCReference Include="RMC.Store.Events.pas"/>
-        <DCCReference Include="SessionManager.pas"/>
-        <DCCReference Include="ShellRunner_PersistentCMD.pas"/>
-        <DCCReference Include="ShellSession.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
@@ -151,15 +131,15 @@
                         <Overwrite>true</Overwrite>
                     </Platform>
                 </DeployFile>
-                <DeployFile LocalName="Win64\Debug\RMCDDPAgent.exe" Configuration="Debug" Class="ProjectOutput">
-                    <Platform Name="Win64">
+                <DeployFile LocalName="Win32\Debug\RMCDDPAgent.exe" Configuration="Debug" Class="ProjectOutput">
+                    <Platform Name="Win32">
                         <RemoteName>RMCDDPAgent.exe</RemoteName>
                         <Overwrite>true</Overwrite>
                     </Platform>
                 </DeployFile>
-                <DeployFile LocalName="Win64\Debug\RMCDDPAgent.rsm" Configuration="Debug" Class="DebugSymbols">
+                <DeployFile LocalName="Win64\Debug\RMCDDPAgent.exe" Configuration="Debug" Class="ProjectOutput">
                     <Platform Name="Win64">
-                        <RemoteName>RMCDDPAgent.rsm</RemoteName>
+                        <RemoteName>RMCDDPAgent.exe</RemoteName>
                         <Overwrite>true</Overwrite>
                     </Platform>
                 </DeployFile>
