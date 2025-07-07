@@ -1,0 +1,42 @@
+{
+  "agent_id": "agent_12345678",
+  "shell_type": "cmd",
+  "session_limit": 10,
+  "channel_type": "ddp",
+  "http": {
+    "url": "http://localhost:3000",
+    "timeout": 30000,
+    "retries": 3
+  },
+  "// Configurazione Auth": "",
+  "AuthRules": {
+    "whitelist": [
+      "dir*",
+      "cd*",
+      "echo*",
+      "ping*",
+      "ipconfig*",
+      "systeminfo"
+    ],
+    "blacklist": [
+      "format*",
+      "del /s*",
+      "rm -rf*",
+      "shutdown*",
+      "net user*"
+    ]
+  },
+  "ddp": {
+    "server_url": "ws://localhost:3000/websocket",
+    "username": "",
+    "password": "",
+    "token": "",
+    "reconnect_attempts": 5,
+    "heartbeat_interval": 30000
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "agent.log"
+  }
+}
+
