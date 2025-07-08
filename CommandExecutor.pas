@@ -11,7 +11,6 @@ uses
   System.Generics.Collections,
   System.SyncObjs,
   RMC.Data,
-  RMC.ActionCreator,
   AgentServiceI,
   System.DateUtils;
 
@@ -53,7 +52,7 @@ type
   private
     FAgentId: string;
     FAgentData: IAgentData;
-    FActionCreator: IActionCreatorAgent;
+    //FActionCreator: IActionCreatorAgent;
     FShellRunnerFactory: IShellRunnerFactory;
     FRunningCommands: TDictionary<string, TRunningCommand>;
     FLock: TCriticalSection;
@@ -114,7 +113,7 @@ begin
   FAgentId := AAgentId;
   FAgentData := AAgentData;
   FShellRunnerFactory := AShellRunnerFactory;
-  FActionCreator := GetActionCreatorAgentWithId(AAgentId);
+  //FActionCreator := GetActionCreatorAgentWithId(AAgentId);
   FRunningCommands := TDictionary<string, TRunningCommand>.Create;
   FLock := TCriticalSection.Create;
 end;
@@ -161,6 +160,7 @@ begin
 
     // Crea il shell runner
     try
+      // TODO questo è stato creato dalla sessione, devo recuperare al sessione nel session manager.
       ShellRunner := FShellRunnerFactory.CreateRunner('cmd_persistent');
       WriteLn(Format('[CommandExecutor] Created shell runner for session: %s', [ASessionId]));
     except
@@ -168,7 +168,7 @@ begin
       begin
         WriteLn(Format('[CommandExecutor] Error creating shell runner: %s', [E.Message]));
         FAgentData.SendError(FAgentId, ASessionId, 'Failed to create shell runner: ' + E.Message);
-        FActionCreator.OnCommandError(ACommandId, ASessionId, 'Failed to create shell runner: ' + E.Message);
+        //FActionCreator.OnCommandError(ACommandId, ASessionId, 'Failed to create shell runner: ' + E.Message);
         Exit;
       end;
     end;
@@ -184,7 +184,7 @@ begin
   // Notifica che il comando sta per essere eseguito
   FAgentData.SendOutput(FAgentId, ASessionId, 'status',
     Format('Starting execution of command: %s', [ACommandLine]));
-  FActionCreator.OnCommandExecuting(ACommandId, ASessionId);
+  //FActionCreator.OnCommandExecuting(ACommandId, ASessionId);
 
   // Esegui il comando in modo asincrono usando i callback
   try
@@ -217,7 +217,7 @@ begin
       // Rimuovi il comando dalla lista e invia errore
       RemoveCommand(ACommandId);
       FAgentData.SendError(FAgentId, ASessionId, 'Error starting command: ' + E.Message);
-      FActionCreator.OnCommandError(ACommandId, ASessionId, 'Error starting command: ' + E.Message);
+      //FActionCreator.OnCommandError(ACommandId, ASessionId, 'Error starting command: ' + E.Message);
     end;
   end;
 end;
@@ -293,7 +293,7 @@ begin
 
   // Invia la notifica di completamento
   FAgentData.SendCommandComplete(FAgentId, RunningCommand.SessionId, AExitCode);
-  FActionCreator.OnCommandCompleted(ACommandId, RunningCommand.SessionId, AExitCode);
+  //FActionCreator.OnCommandCompleted(ACommandId, RunningCommand.SessionId, AExitCode);
 
   // Invia un riepilogo dell'output se necessario
   if RunningCommand.OutputBuffer.Count > 0 then
@@ -331,7 +331,7 @@ begin
     // Notifica la cancellazione
     FAgentData.SendOutput(FAgentId, RunningCommand.SessionId, 'status',
       Format('Command %s was cancelled', [ACommandId]));
-    FActionCreator.OnCommandError(ACommandId, RunningCommand.SessionId, 'Command cancelled by user');
+    //FActionCreator.OnCommandError(ACommandId, RunningCommand.SessionId, 'Command cancelled by user');
 
   except
     on E: Exception do

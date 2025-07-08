@@ -10,7 +10,7 @@ uses
   System.SysUtils,
   System.Net.HttpClient,
   Flux.Dispatcher,
-  System.Threading;
+  System.Threading;  // AGGIUNTO;
 
 type
   IAgentData = interface
@@ -50,6 +50,10 @@ type
 
     // Metodo per avviare le sottoscrizioni quando DDP è pronto
     procedure StartSubscriptions(const AAgentId: string);
+    procedure ping(const ASessionId: string);
+
+    function TestInsertSessionForAgent(const AAgentId: string): string;
+    function TestInsertCommandForAgent(const AAgentId, ASessionId, ACommand: string): string;
   end;
 
 function GetAgentData(const ADDPClient: IDDPClient): IAgentData;
@@ -60,7 +64,9 @@ uses
   Grijjy.Data.Bson,
   System.SyncObjs,
   System.DateUtils,
-  DDP.RequestGenerator;
+  DDP.RequestGenerator,
+  Nanosystems.Http,
+  Nanosystems.Http.Factory;
 
 const
   // Subscriptions
@@ -92,7 +98,7 @@ const
   AGENT_HEARTBEAT = 'agent.heartbeat';
   AGENT_UPDATE_SESSIONS = 'agent.updateSessions';
   AGENT_UNREGISTER = 'agent.unregister';
-
+  TEST_PING = 'test.ping';
 type
   TAgentData = class(TInterfacedObject, IAgentData)
   private
@@ -138,7 +144,10 @@ type
       const ATimeout: Integer = 0; const APriority: Integer = 5);
 
     procedure StartSubscriptions(const AAgentId: string);
+    procedure ping(const ASessionId: string);
 
+    function TestInsertSessionForAgent(const AAgentId: string): string;
+    function TestInsertCommandForAgent(const AAgentId, ASessionId, ACommand: string): string;
   public
     constructor Create(const ADDPClient: IDDPClient);
     destructor Destroy; override;
@@ -163,6 +172,58 @@ begin
   inherited;
 end;
 
+
+function TAgentData.TestInsertSessionForAgent(const AAgentId: string): string;
+begin
+  try
+    WriteLn('[AgentData] Calling test.insertSessionForAgent...');
+    var SessionResult := FDDPClient.Method('test.insertSessionForAgent',
+      TgrBsonArray.Create([AAgentId]));
+
+    if not SessionResult.IsNil then
+      Result := SessionResult.AsString
+    else
+      Result := '';
+
+    WriteLn('[AgentData] Session inserted: ' + Result);
+  except
+    on E: Exception do
+    begin
+      WriteLn('[AgentData] Error in TestInsertSessionForAgent: ' + E.Message);
+      Result := '';
+    end;
+  end;
+end;
+
+function TAgentData.TestInsertCommandForAgent(const AAgentId, ASessionId, ACommand: string): string;
+begin
+  try
+    WriteLn('[AgentData] Calling test.insertCommandForAgent...');
+    var CommandResult := FDDPClient.Method('test.insertCommandForAgent', TgrBsonArray.Create([
+      TgrBsonDocument.Create
+        .Add('agent_id', AAgentId)
+        .Add('session_id', ASessionId)
+        .Add('command', ACommand)
+        .Add('priority', 5)
+        .Add('status', 'pending')
+    ]));
+
+    if not CommandResult.IsNil then
+      Result := CommandResult.AsString
+    else
+      Result := '';
+
+    WriteLn('[AgentData] Command inserted: ' + Result);
+  except
+    on E: Exception do
+    begin
+      WriteLn('[AgentData] Error in TestInsertCommandForAgent: ' + E.Message);
+      Result := '';
+    end;
+  end;
+end;
+
+
 procedure TAgentData.CallMethod(const AMethodName: string; const AParams: TgrBsonArray);
 begin
   if FStandby then
@@ -181,6 +242,7 @@ begin
         try
           var Result := FDDPClient.Method(AMethodName, AParams);
           WriteLn(Format('[Data] DDP method %s completed successfully', [AMethodName]));
+          WriteLn('%s response: %s', AMethodName, Result.AsString);
         except
           on E: Exception do
             WriteLn(Format('[Data] DDP method %s failed: %s', [AMethodName, E.Message]));
@@ -194,19 +256,20 @@ begin
   end;
 end;
 
+
 procedure TAgentData.HttpMethod(const AMethodName: string; const AParams: TgrBsonArray);
 var
-  LHttpClient: THTTPClient;
-  LHttpClientRequest: IHTTPRequest;
+  LHttpClient: InsHttpClient;
+  LHttpClientRequest: InsHttpClientRequest;
 begin
-  LHttpClient := THTTPClient.Create;
-  try
-    LHttpClientRequest := LHttpClient.GetRequest(FRestUrl, AMethodName);
-    LHttpClientRequest.AddHeader('Authorization', 'Bearer ' + GetToken);
-    {TODO COMPLETARE}
-  finally
-    LHttpClient.Free;
-  end;
+  LHttpClient := TnsHttpFactory.GetHttpClient;
+
+  LHttpClientRequest := TnsHttpClientRequest.Create;
+  LHttpClientRequest.Authorization := 'Bearer ' + GetToken;
+  LHttpClientRequest.Body := TEncoding.UTF8.GetBytes(AParams.ToJson);
+  LHttpClientRequest.ContentType := 'application/json';
+
+  LHttpClient.Post(FRestUrl + '/methods/' + AMethodName, LHttpClientRequest);
 end;
 
 function TAgentData.GetToken: string;
@@ -240,8 +303,8 @@ begin
   WriteLn('[Data] Starting subscriptions for agent: ' + AAgentId);
 
   try
-    SubscribeToCommands(AAgentId);
     SubscribeToSessions(AAgentId);
+    SubscribeToCommands(AAgentId);
     SubscribeToAgentControl;
 
     WriteLn('[Data] All subscriptions started successfully');
@@ -506,6 +569,22 @@ begin
   CallMethod(COMMAND_EXECUTE, TgrBsonArray.Create([LBsonDoc]));
 end;
 
+// ========================================================================
+// TEST FUNCTION
+// ========================================================================
+
+
+// Command execution
+procedure TAgentData.ping(const ASessionId: string);
+var
+  LBsonDoc: TgrBsonDocument;
+begin
+  LBsonDoc := TgrBsonDocument.Create;
+  LBsonDoc['sessionId'] := ASessionId;
+  LBsonDoc['timestamp'] := Now;
+
+  CallMethod(TEST_PING, TgrBsonArray.Create([LBsonDoc]));
+end;
 // ========================================================================
 // FACTORY FUNCTION
 // ========================================================================

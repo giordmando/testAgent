@@ -72,7 +72,6 @@ function GetStoreAgent(const AAgentId: string): IStoreAgent;
 implementation
 
 uses
-  RMC.ActionCreator,
   System.SyncObjs;
 
 var
@@ -117,10 +116,15 @@ var
   LDoc: TgrBsonDocument;
   LCollection: string;
 begin
+
+  WriteLn('[DEBUG TStoreAgent] OnAction chiamato');
+  WriteLn('[DEBUG TStoreAgent] Dispatcher ID: ' + IntToHex(Integer(FDispatcher), 8));
+
+
   Assert(AAction is TFluxAction);
 
   LActionType := LAction.&Type;
-
+  WriteLn('[DEBUG TStoreAgent] Action type: ' + LActionType);
   // Gestisci solo le azioni DDP per le collection
   if (LActionType = ACTION_DDP_DOCUMENT_ADDED) or
      (LActionType = ACTION_DDP_DOCUMENT_CHANGED) or
@@ -245,11 +249,6 @@ begin
     else
     begin
       WriteLn('[StoreAgent] CommandExecutor not available - command not executed');
-
-      // Almeno triggera l'ActionCreator
-      var ActionCreator := GetActionCreatorAgentWithId(FAgentId);
-      if Assigned(ActionCreator) then
-        ActionCreator.OnCommandReceived(CommandId, SessionId, CommandLine, Priority, Timeout);
     end;
 
     EmitStoreChange;
@@ -274,7 +273,6 @@ procedure TStoreAgent.HandleSessionAdded(const ADoc: TgrBsonDocument);
 var
   SessionId, UserId, ShellType: string;
   AgentId: string;
-  ActionCreator: IActionCreatorAgent;
 begin
   WriteLn('[StoreAgent] *** NEW SESSION RECEIVED ***');
 
@@ -315,11 +313,6 @@ begin
     FLastSession.AddPair('user_id', UserId);
     FLastSession.AddPair('shell_type', ShellType);
 
-    // Triggera l'azione per aprire la sessione
-    ActionCreator := GetActionCreatorAgentWithId(FAgentId);
-    if Assigned(ActionCreator) then
-      ActionCreator.OnSessionOpenRequested(SessionId, UserId, ShellType);
-
     EmitStoreChange;
   end;
 end;
@@ -340,7 +333,7 @@ end;
 procedure TStoreAgent.HandleAgentControlAdded(const ADoc: TgrBsonDocument);
 var
   Action: string;
-  ActionCreator: IActionCreatorAgent;
+
 begin
   WriteLn('[StoreAgent] *** AGENT CONTROL RECEIVED ***');
 
@@ -353,18 +346,6 @@ begin
       Action := Fields['action'].AsString;
 
       WriteLn(Format('[StoreAgent] Agent control action: %s', [Action]));
-
-      // Triggera l'azione di controllo
-      ActionCreator := GetActionCreatorAgentWithId(FAgentId);
-      if Assigned(ActionCreator) then
-      begin
-        if Action = 'shutdown' then
-          ActionCreator.OnShutdownRequested
-        else if Action = 'restart' then
-          ActionCreator.OnRestartRequested
-        else if Action = 'status' then
-          ActionCreator.OnStatusRequested;
-      end;
 
       EmitStoreChange;
     end;
